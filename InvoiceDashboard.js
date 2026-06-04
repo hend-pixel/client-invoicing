@@ -125,13 +125,11 @@ export default function InvoiceDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ invoiceData }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      const blob = new Blob([data.code], { type: "text/x-python" });
+        const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      pdfRef.current = { url, filename: `generate_invoice_${d.invoiceNum}.py` };
+              const a = document.createElement("a"); a.href = url; a.download = `invoice_${d.invoiceNum}.pdf`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       setStatus(p => ({ ...p, pdf: "ready" }));
-      addLog(`Script ready — run: python3 generate_invoice_${d.invoiceNum}.py`, "success");
+              addLog(`Invoice PDF downloaded successfully`, "success");
     } catch (e) {
       addLog("PDF generation failed: " + e.message, "error");
     }
