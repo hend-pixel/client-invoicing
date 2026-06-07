@@ -1,37 +1,118 @@
-import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Renamed: this route now creates a Gmail draft with the invoice PDF attached.
+// Required Vercel env vars:
+//   GMAIL_CLIENT_ID      — from Google Cloud Console (OAuth 2.0 client)
+//   GMAIL_CLIENT_SECRET  — same OAuth 2.0 client
+//   GMAIL_REFRESH_TOKEN  — one-time OAuth flow; see README for how to generate
 
 export async function POST(request) {
   try {
-    const { invoiceNum, phase, clientName, signerName, signerEmail, grand, dueDate, fromName, fromEmail } = await request.json();
+    const data = await request.json();
+    const { invoiceNum, phase, clientName, signerName, signerEmail,
+            billToEmail, grand, dueDate, fromName, fromEmail } = data;
 
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      messages: [{
-        role: "user",
-        content: `Generate a complete curl command to create and send a DocuSign envelope via the DocuSign REST API (demo environment: account-d.docusign.com).
+    const toEmail = billToEmail || signerEmail;
 
-Invoice: #${invoiceNum} | Client: ${clientName} | Amount: $${grand} | Due: ${dueDate}
-Signer: Name="${signerName}", Email="${signerEmail}"
-From: ${fromName}, ${fromEmail}
-Email subject: "Invoice #${invoiceNum} — ${phase} | $${grand} USD"
-Email body: "Please review and acknowledge receipt of Invoice #${invoiceNum} for ${phase}. Total: $${grand} USD, due ${dueDate}."
-
-The envelope should:
-1. Use an htmlDefinition document with the invoice summary
-2. Include a signature tab for the signer
-3. Set status to "sent"
-
-Return ONLY the curl command with placeholders {{ACCESS_TOKEN}} and {{ACCOUNT_ID}}. No explanation, no markdown.`,
-      }],
+    // ── 1. Exchange refresh token for a fresh access token ────────────────
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     process.env.GMAIL_CLIENT_ID,
+        client_secret: process.env.GMAIL_CLIENT_SECRET,
+        refresh_token: process.env.GMAIL_REFRESH_TOKEN,
+        grant_type:    'refresh_token',
+      }),
     });
+    if (!tokenRes.ok) {
+      const err = await tokenRes.text();
+      return Response.json({ error: 'Gmail token error: ' + err }, { status: 500 });
+    }
+    const { access_token } = await tokenRes.json();
 
-    const curlCmd = message.content[0].text;
-    return Response.json({ curlCmd });
+    // ── 2. Generate the invoice PDF ───────────────────────────────────────
+    const pdfRes = await fetch(
+      new URL('/api/generate-pdf', request.url).toString(),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceData: data }),
+      }
+    );
+    if (!pdfRes.ok) {
+      return Response.json({ error: 'PDF generation failed' }, { status: 500 });
+    }
+    const pdfBuffer = await pdfRes.arrayBuffer();
+    const pdfBase64 = Buffer.from(pdfBuffer).toString('base64');
+
+    // ── 3. Build the RFC 2822 email with PDF attachment ───────────────────
+    const subject = `Invoice #${invoiceNum} — ${phase} | $${grand} USD`;
+    const bodyText = [
+      `Hi ${signerName},`,
+      ``,
+      `Please find Invoice #${invoiceNum} for ${phase} attached.`,
+      ``,
+      `Total Due:  $${grand} USD`,
+      `Due Date:   ${dueDate}`,
+      ``,
+      `Please don't hesitate to reach out with any questions.`,
+      ``,
+      `Best,`,
+      `${fromName}`,
+      `AIVC, Inc.`,
+      fromEmail,
+    ].join('\n');
+
+    const boundary = 'aivc_boundary_' + Date.now();
+    const rawParts = [
+      `MIME-Version: 1.0`,
+      `To: ${toEmail}`,
+      `From: ${fromName} <${fromEmail}>`,
+      `Subject: ${subject}`,
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      ``,
+      `--${boundary}`,
+      `Content-Type: text/plain; charset="UTF-8"`,
+      ``,
+      bodyText,
+      ``,
+      `--${boundary}`,
+      `Content-Type: application/pdf; name="Invoice_${invoiceNum}.pdf"`,
+      `Content-Disposition: attachment; filename="Invoice_${invoiceNum}.pdf"`,
+      `Content-Transfer-Encoding: base64`,
+      ``,
+      pdfBase64,
+      ``,
+      `--${boundary}--`,
+    ].join('\r\n');
+
+    const encodedEmail = Buffer.from(rawParts)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    // ── 4. Create Gmail draft ─────────────────────────────────────────────
+    const draftRes = await fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: { raw: encodedEmail } }),
+      }
+    );
+
+    if (!draftRes.ok) {
+      const err = await draftRes.text();
+      return Response.json({ error: 'Gmail draft error: ' + err }, { status: 500 });
+    }
+
+    const draft = await draftRes.json();
+    return Response.json({ status: 'draft_created', draftId: draft.id });
+
   } catch (err) {
-    console.error(err);
     return Response.json({ error: err.message }, { status: 500 });
   }
 }
