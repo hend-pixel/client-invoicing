@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 
 const AIVC = {
   name: "Emily Tavis", company: "AIVC, Inc.",
@@ -83,13 +83,12 @@ export default function InvoiceDashboard() {
     totalFee: "150000", expenses: "0",
     billToName: "Accounts Payable", billToEmail: "",
     paymentTermsDays: "30", customDue: "",
-    signerName: "", signerEmail: "",
+    
   });
-  const [status, setStatus] = useState({ pdf: null, docusign: null });
-  const [loading, setLoading] = useState({ pdf: false, docusign: false });
+    const [status, setStatus] = useState({ pdf: null });
+    const [loading, setLoading] = useState({ pdf: false });
   const [logs, setLogs] = useState([]);
-  const pdfRef = useRef(null);
-
+  
   const set = (k) => (e) => setD(prev => ({ ...prev, [k]: e.target.value }));
   const addLog = (msg, type = "info") => setLogs(p => [...p, { msg, type, t: new Date().toLocaleTimeString() }]);
 
@@ -136,45 +135,7 @@ export default function InvoiceDashboard() {
     setLoading(p => ({ ...p, pdf: false }));
   }
 
-  function downloadPDFScript() {
-    if (!pdfRef.current) return;
-    const a = document.createElement("a");
-    a.href = pdfRef.current.url;
-    a.download = pdfRef.current.filename;
-    a.click();
-  }
-
-  async function sendToDocuSign() {
-    if (!d.signerEmail) { addLog("Enter signer email first", "error"); return; }
-    setLoading(p => ({ ...p, docusign: true }));
-    addLog(`Preparing DocuSign envelope for ${d.signerEmail}...`);
-    try {
-      const res = await fetch("/api/docusign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          invoiceNum: d.invoiceNum, phase: d.phase, clientName: d.clientName,
-          signerName: d.signerName || "Accounts Payable", signerEmail: d.signerEmail,
-          grand: fmt(grand), dueDate, fromName: AIVC.name, fromEmail: AIVC.email,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      const blob = new Blob([data.curlCmd], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `docusign_invoice_${d.invoiceNum}.sh`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatus(p => ({ ...p, docusign: "sent" }));
-      addLog(`DocuSign script downloaded. Fill in {{ACCESS_TOKEN}} + {{ACCOUNT_ID}} and run it.`, "success");
-    } catch (e) {
-      addLog("DocuSign step failed: " + e.message, "error");
-    }
-    setLoading(p => ({ ...p, docusign: false }));
-  }
-
+  
   const inputStyle = { width: "100%", padding: "9px 11px", border: "1.5px solid rgba(255,255,255,0.12)", borderRadius: 6, fontSize: 13, background: "rgba(255,255,255,0.07)", color: "#fff", outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
   const labelStyle = { display: "block", fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 5 };
   const field = (label, key, type = "text", extra = {}) => (
@@ -197,7 +158,7 @@ export default function InvoiceDashboard() {
       <div style={{ background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.08)", padding: "16px 36px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: 17, letterSpacing: 0.5 }}>⚡ AIVC Invoice Automation</div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>PDF → DocuSign, in one flow</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Generate & download your invoice PDF</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {["Details", "Preview & Send"].map((s, i) => (
@@ -289,36 +250,7 @@ export default function InvoiceDashboard() {
                 <ActionBtn onClick={generatePDF} loading={loading.pdf} done={status.pdf === "ready"} color="linear-gradient(90deg,#667eea,#764ba2)">
                   Generate Invoice PDF
                 </ActionBtn>
-                {status.pdf === "ready" && (
-                  <button onClick={downloadPDFScript} style={{ width: "100%", marginTop: 8, padding: "9px", borderRadius: 6, border: "1px solid rgba(124,220,100,0.3)", background: "transparent", color: "#7cdc64", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-                    ⬇ Download Python Script
-                  </button>
-                )}
-              </div>
-              {/* DocuSign */}
-              <div style={{ background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: "18px 20px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(255,180,50,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>✍️</div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>Send via DocuSign</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Request signature from client</div>
-                  </div>
-                </div>
-                <div style={{ marginBottom: 10 }}>
-                  <label style={labelStyle}>Signer Name</label>
-                  <input value={d.signerName} onChange={set("signerName")} placeholder="e.g. Molly Moore" style={inputStyle} />
-                </div>
-                <div style={{ marginBottom: 10 }}>
-                  <label style={labelStyle}>Signer Email</label>
-                  <input value={d.signerEmail} onChange={set("signerEmail")} type="email" placeholder="accountspayable@client.com" style={inputStyle} />
-                </div>
-                <ActionBtn onClick={sendToDocuSign} loading={loading.docusign} done={status.docusign === "sent"} color="linear-gradient(90deg,#f7971e,#ffd200)">
-                  Send to DocuSign →
-                </ActionBtn>
-                <div style={{ marginTop: 8, fontSize: 11, color: "rgba(255,255,255,0.3)", lineHeight: 1.5 }}>
-                  Downloads a shell script. Add your DocuSign credentials and run it.
-                </div>
-              </div>
+                div>
               {/* Activity log */}
               {logs.length > 0 && (
                 <div style={{ background: "rgba(0,0,0,0.35)", borderRadius: 8, padding: "12px 14px", fontFamily: "monospace", fontSize: 11 }}>
