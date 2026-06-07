@@ -85,8 +85,8 @@ export default function InvoiceDashboard() {
     paymentTermsDays: "30", customDue: "",
     
   });
-    const [status, setStatus] = useState({ pdf: null });
-    const [loading, setLoading] = useState({ pdf: false });
+      const [status, setStatus] = useState({ pdf: null, draft: null });
+      const [loading, setLoading] = useState({ pdf: false, draft: false });
   const [logs, setLogs] = useState([]);
   
   const set = (k) => (e) => setD(prev => ({ ...prev, [k]: e.target.value }));
@@ -135,6 +135,31 @@ export default function InvoiceDashboard() {
     setLoading(p => ({ ...p, pdf: false }));
   }
 
+    async function emailDraft() {
+        if (!d.billToEmail) { addLog("Enter a Bill To Email first", "error"); return; }
+            setLoading(p => ({ ...p, draft: true }));
+                addLog(`Creating Gmail draft for ${d.billToEmail}...`);
+                    try {
+                          const grand = fmt(amt + (d.invoiceType === "final" ? (Number(d.expenses) || 0) : 0));
+                                const res = await fetch("/api/docusign", {
+                                        method: "POST",
+                                                headers: { "Content-Type": "application/json" },
+                                                        body: JSON.stringify({
+                                                                  invoiceNum: d.invoiceNum, phase: d.phase, clientName: d.clientName,
+                                                                            signerName: d.billToName || "Team", signerEmail: d.billToEmail,
+                                                                                      billToEmail: d.billToEmail, grand, dueDate,
+                                                                                                fromName: "Emily Tavis", fromEmail: "emily@aivc.com",
+                                                                                                        }),
+                                                                                                              });
+                                                                                                                    const data = await res.json();
+                                                                                                                          if (data.error) throw new Error(data.error);
+                                                                                                                                setStatus(p => ({ ...p, draft: "sent" }));
+                                                                                                                                      addLog(`Gmail draft created — check your Drafts folder`, "success");
+                                                                                                                                          } catch (e) {
+                                                                                                                                                addLog("Draft failed: " + e.message, "error");
+                                                                                                                                                    }
+                                                                                                                                                        setLoading(p => ({ ...p, draft: false }));
+                                                                                                                                                          }
   
   const inputStyle = { width: "100%", padding: "9px 11px", border: "1.5px solid rgba(255,255,255,0.12)", borderRadius: 6, fontSize: 13, background: "rgba(255,255,255,0.07)", color: "#fff", outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
   const labelStyle = { display: "block", fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 5 };
@@ -249,7 +274,7 @@ export default function InvoiceDashboard() {
                 </div>
                 <ActionBtn onClick={generatePDF} loading={loading.pdf} done={status.pdf === "ready"} color="linear-gradient(90deg,#667eea,#764ba2)">
                   Generate Invoice PDF
-                </ActionBtn>
+                </ActionBtn>        <ActionBtn onClick={emailDraft} loading={loading.draft} done={status.draft === "sent"} color="linear-gradient(90deg,#1a5276,#2471a3)">          ✉️ Email Invoice Draft        </ActionBtn>
                 div>
               {/* Activity log */}
               {logs.length > 0 && (
